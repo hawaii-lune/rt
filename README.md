@@ -8,13 +8,19 @@ from it's packages.
 This can be built in two steps, first by bundling it with darklua, then by
 getting lune to build it to an `exe`.
 
-Since no CHWI file is loaded in the standalone debug, this will assume the role
-of loading HWI files. (Note, if the CHWI matches that of Hawaii.CLI, the
-debugger is still enabled)
-
 ```bat
 darklua process src/init.luau out/Hawaii.luau
 lune build -t win-x86_64 -o out/Hawaii.exe out/Hawaii.luau
+```
+
+To include a CHWI file before building, add a `.chwi.luau` file into the `src`
+folder. This should be formatted with Base64, and have a linebreak every 80
+characters. It should follow the form:
+
+```lua
+return [[
+Base64 encoded CHWI file
+]]
 ```
 
 ## Exports
@@ -28,6 +34,9 @@ These are as of current:
 * `Bookstrapper` - disabled as of current
 * `PackageIO` - library to work with HWI / CHWI files
 * `URI` - **U**niform **R**esource **I**ndentifier library
+
+> can we have asymmetric enc in lune already so i can validate my own packages,
+> thanks :3
 
 ## Regarding Hawaii.Builder
 
