@@ -16,8 +16,8 @@ export type URI = typeof(setmetatable({}::{
 	Parent: (URI) -> URI?,
 	ToString: (URI, target: PathOutputTarget?) -> string
 },{}::{
-	__index: (URI, string) -> URI?,
-	__concat: (URI, URI) -> URI?
+	__index: (URI, string) -> URI,
+	__concat: (URI, URI) -> URI
 }))
 
 local function getStaticIndex(components: {string}, relative: boolean)
