@@ -1,5 +1,10 @@
+-- This file is part of the Hawaii Runtime.
+-- Licensed under the Mozilla Public License, Version 2.0 (MPL-2.0).
+-- You may obtain a copy of the License at:
+--   https://www.mozilla.org/en-US/MPL/2.0/
+
 local BasicTypes = {}
-type OffsetPointer = {offset: number}
+export type OffsetPointer = {offset: number}
 
 function BasicTypes.MergeBuffer(b1: buffer, b2: buffer): buffer
 	local b1l, b2l = buffer.len(b1), buffer.len(b2)
@@ -19,16 +24,13 @@ function BasicTypes.ULEB128(b: buffer, offsetPtr: OffsetPointer): number
 	local offset = offsetPtr.offset
 
 	while true do
-		-- Read the current byte
 		local byte = buffer.readu8(b, offset)
 		offset += 1
 		bytesRead += 1
 
-		-- Extract the value (7 bits) and accumulate into result
 		result = result + bit32.band(byte, 0x7F) * 2^shift
 		shift += 7
 
-		-- Check the MSB; if 0, we're done
 		if bit32.band(byte, 0x80) == 0 then
 			break
 		end
@@ -44,6 +46,16 @@ function BasicTypes.ULEB128Size(n: number): number
 	end
 
 	return math.ceil(math.log(n + 1, 128))
+end
+
+function BasicTypes.SizeofULEBString(s: string): number
+	local size = string.len(s)
+	return BasicTypes.ULEB128Size(size) + size
+end
+
+function BasicTypes.SizeofULEBBuffer(b: buffer): number
+	local size = buffer.len(b)
+	return BasicTypes.ULEB128Size(size) + size
 end
 
 function BasicTypes.WriteULEB128(n: number): buffer

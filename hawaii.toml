@@ -1,0 +1,6 @@
+# This is hack and we should find a better method for embedded bootstrapper
+# exports into the running XHWI/HWI
+name = "Hawaii.System"
+
+[directories]
+source = "Hawaii.System"
