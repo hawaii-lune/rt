@@ -1,23 +1,26 @@
--- Implements a UNIX-like URI
--- Can output to a Windows-like or UNIX-like path
+-- This file is part of the Hawaii Runtime.
+-- Licensed under the Mozilla Public License, Version 2.0 (MPL-2.0).
+-- You may obtain a copy of the License at:
+--   https://www.mozilla.org/en-US/MPL/2.0/
 
 local process = require("@lune/process")
 type PathOutputTarget = "UNIX"|"DOS"
-local staticPaths = setmetatable({}, {__mode = "v"})
+local staticPaths = setmetatable({}::{[string]: Path}, {__mode = "v"})
 
-local LOCAL_TARGET = if process.os == "windows" then "DOS" else "UNIX"
+local LOCAL_TARGET: PathOutputTarget = if process.os == "windows" then "DOS" else "UNIX"
 local ILLEGAL_DOS_CHARS = '[:<>"|?*\\/]'
 local DOS_DRIVE = "^%w+:$"
 
-export type URI = typeof(setmetatable({}::{
+export type Path = typeof(setmetatable({}::{
 	Tree: {string},
 	File: string,
 	Relative: boolean,
-	Parent: (URI) -> URI?,
-	ToString: (URI, target: PathOutputTarget?) -> string
+	Parent: (Path) -> Path?,
+	ToString: (Path, target: PathOutputTarget?) -> string
 },{}::{
-	__index: (URI, string) -> URI,
-	__concat: (URI, URI) -> URI
+	__concat: (Path, Path) -> Path,
+	__index: (Path, string) -> Path,
+	__tostring: (Path) -> string
 }))
 
 local function getStaticIndex(components: {string}, relative: boolean)
@@ -25,7 +28,7 @@ local function getStaticIndex(components: {string}, relative: boolean)
 	return if relative then parentString else `/{parentString}`
 end
 
-local newURI
+local getPath
 
 local function stringTrim(str: string): string
 	return string.match(str, "^%s*(.-)%s*$") or ""
@@ -54,49 +57,52 @@ local function appendComponents<T>(lhs: {T}, rhs: {T}): {T}
 	return table.move(rhs, 1, #rhs, #lhs + 1, lhs)
 end
 
-local function joinPathString(lhs: URI, pathStream: string): URI
+local function joinPathString(lhs: Path, pathStream: string): Path
 	local components, relative = sanitisePathComponents(pathStream, "/")
 	if not relative then error("cannot join an absolute path to an existing path") end
-	return newURI(appendComponents(table.clone(lhs.Tree), components), lhs.Relative)
+	return getPath(appendComponents(table.clone(lhs.Tree), components), lhs.Relative)
 end
 
-local function joinPathURI(lhs: URI, rhs: URI)
+local function joinPath(lhs: Path, rhs: Path)
 	if not rhs.Relative then error("cannot join an absolute path to an existing path") end
-	return newURI(appendComponents(table.clone(lhs.Tree), rhs.Tree), lhs.Relative)
+	return getPath(appendComponents(table.clone(lhs.Tree), rhs.Tree), lhs.Relative)
 end
 
-local function appendURI(uri: URI, loc: string): URI?
+local function appendPath(path: Path, loc: string): Path
 	if string.find(loc, "/", 0, true) then
 		-- use joinPathString instead
-		return joinPathString(uri, loc)
+		return joinPathString(path, loc)
 	end
 
-	if loc == "." then return uri end
-	local ancestry = table.clone(uri.Tree)
+	if loc == "." then return path end
+	local ancestry = table.clone(path.Tree)
 
 	if loc == ".." then
-		if not ancestry[2] then return nil end
+		if not ancestry[2] then
+			if not path.Relative then error("Attempt to path an absolute path out of the root") end
+			return getPath({".."}, true)
+		end
 		table.remove(ancestry, #ancestry)
 	else
 		table.insert(ancestry, loc)
 	end
 
-	return newURI(ancestry, uri.Relative)
+	return getPath(ancestry, path.Relative)
 end
 
-local function URIParent(self: URI): URI?
-	return appendURI(self, "..")
+local function pathParent(self: Path): Path?
+	return appendPath(self, "..")
 end
 
-local function DOSToString(uri: URI): string
+local function DOSToString(path: Path): string
 	-- this should validate that if relative = false, the first object matches
 	-- the drive format, and everything else is allowed in path rules
 
 	-- technically we should restrict the prohibited file names here but this
 	-- is legacy jank that i'd rather not
 
-	for index, part in uri.Tree do
-		if index == 1 and not uri.Relative then
+	for index, part in path.Tree do
+		if index == 1 and not path.Relative then
 			-- first part should match drive format
 			if not string.match(part, DOS_DRIVE) then error("malformed drive letter") end
 			continue
@@ -106,10 +112,10 @@ local function DOSToString(uri: URI): string
 		if string.match(part, ILLEGAL_DOS_CHARS) then error("prohibited DOS character in path") end
 	end
 
-	return table.concat(uri.Tree, "\\")
+	return table.concat(path.Tree, "\\")
 end
 	
-local function URIToString(self: URI, target: string?): string
+local function pathToString(self: Path, target: PathOutputTarget?): string
 	target = target or LOCAL_TARGET
 	-- because DOS paths are more restrictive, it needs its own function
 	if target == "DOS" then return DOSToString(self) end 
@@ -118,16 +124,17 @@ local function URIToString(self: URI, target: string?): string
 	return `{UNIX_REL}{table.concat(self.Tree, "/")}`
 end
 
-local URI_MT = {
-	__index = appendURI,
-	__concat = joinPathURI
+local PATH_MT = {
+	__index = appendPath,
+	__concat = joinPath,
+	__tostring = pathToString
 }
 
 local function unwrapDotPaths(components: {string}, relative: boolean): {string}
 	local stack = {} -- output stack
 	local stackSize = 0 -- size of the stack (optimization when we're popping)
 	local workingSize = 0 -- size of the current file path, different to stack size
-	local relativeReentryName -- used to simplify cases like folder/../folder -> folder
+	local relativeReentryName: string? -- used to simplify cases like folder/../folder -> folder
 
 	for _, component in components do
 		if component == "." then continue end -- Do nothing, refers to the same directory
@@ -179,42 +186,42 @@ local function unwrapDotPaths(components: {string}, relative: boolean): {string}
 	return stack
 end
 
-function newURI(components: {string}, relative: boolean): URI
+function getPath(components: {string}, relative: boolean): Path
+	components = unwrapDotPaths(components, relative)
 	local staticIndex = getStaticIndex(components, relative)
-	local uri = staticPaths[staticIndex]
+	local path: Path? = staticPaths[staticIndex]
 
-	if not uri then
-		components = unwrapDotPaths(components, relative)
+	if not path then
 		local file = components[#components]
 
-		uri = setmetatable({
+		path = setmetatable({
 			Tree = components,
 			File = file,
 			Relative = relative,
-			Parent = URIParent,
-			ToString = URIToString
-		}, URI_MT)
+			Parent = pathParent,
+			ToString = pathToString
+		}, PATH_MT)
 
-		table.freeze(uri)
-		staticPaths[staticIndex] = uri
+		table.freeze(path)
+		staticPaths[staticIndex] = path
 	end
 
-	return uri::URI
+	return path::Path
 end
 
-local URI = {}
+local Path = {}
 
-function URI.fromUNIX(path: string): URI
+function Path.fromUNIX(path: string): Path
 	local components, relative = sanitisePathComponents(path, "/")
-	return newURI(components, relative)
+	return getPath(components, relative)
 end
 
-function URI.fromDOS(path: string): URI
+function Path.fromDOS(path: string): Path
 	path = string.gsub(path, "/", "\\")
 	local components, relative = sanitisePathComponents(path, "\\")
 
 	if not relative then
-		local upper = string.match(process.cwd, "^(%w+:)\\")
+		local upper = string.match(process.cwd, "^(%w+:)\\") or "C:"
 		table.insert(components, 1, if LOCAL_TARGET == "UNIX" then "C:" else string.upper(upper))
 	end
 
@@ -233,11 +240,11 @@ function URI.fromDOS(path: string): URI
 		components[index] = trimmed
 	end
 
-	return newURI(components, relative)
+	return getPath(components, relative)
 end
 
-function URI.new(path: string): URI
-	return if LOCAL_TARGET == "DOS" then URI.fromDOS(path) else URI.fromUNIX(path)
+function Path.new(path: string): Path
+	return if LOCAL_TARGET == "DOS" then Path.fromDOS(path) else Path.fromUNIX(path)
 end
 
-return URI
+return Path
